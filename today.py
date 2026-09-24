@@ -6,12 +6,33 @@ from lxml import etree
 import time
 import hashlib
 
-# Fine-grained personal access token with All Repositories access:
-# Account permissions: read:Followers, read:Starring, read:Watching
-# Repository permissions: read:Commit statuses, read:Contents, read:Issues, read:Metadata, read:Pull Requests
-# Issues and pull requests permissions not needed at the moment, but may be used in the future
-HEADERS = {"authorization": "token " + os.environ["ACCESS_TOKEN"]}
-USER_NAME = os.environ["USER_NAME"]  # 'jonatasperaza'
+def load_env():
+    if os.path.exists(".env"):
+        with open(".env", "r") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, val = line.split("=", 1)
+                    key = key.strip()
+                    val = val.strip().strip("'\"")
+                    if key and key not in os.environ:
+                        os.environ[key] = val
+
+load_env()
+
+access_token = os.environ.get("ACCESS_TOKEN")
+if not access_token:
+    try:
+        import subprocess
+        access_token = subprocess.check_output(["gh", "auth", "token"], text=True).strip()
+    except Exception:
+        pass
+
+if not access_token:
+    raise RuntimeError("ACCESS_TOKEN environment variable is not set. Please configure .env or pass ACCESS_TOKEN.")
+
+HEADERS = {"authorization": "token " + access_token}
+USER_NAME = os.environ.get("USER_NAME", "MatheusZenere")
 QUERY_COUNT = {
     "user_getter": 0,
     "follower_getter": 0,
@@ -233,10 +254,15 @@ def loc_counter_one_repo(
     only adds the LOC value of commits authored by me
     """
     for node in history["edges"]:
-        if node["node"]["author"]["user"] == OWNER_ID:
+        if (
+            node
+            and node.get("node")
+            and node["node"].get("author")
+            and node["node"]["author"].get("user") == OWNER_ID
+        ):
             my_commits += 1
-            addition_total += node["node"]["additions"]
-            deletion_total += node["node"]["deletions"]
+            addition_total += node["node"].get("additions", 0)
+            deletion_total += node["node"].get("deletions", 0)
 
     if history["edges"] == [] or not history["pageInfo"]["hasNextPage"]:
         return addition_total, deletion_total, my_commits
@@ -464,7 +490,8 @@ def stars_counter(data):
     """
     total_stars = 0
     for node in data:
-        total_stars += node["node"]["stargazers"]["totalCount"]
+        if node and node.get("node") and node["node"].get("stargazers"):
+            total_stars += node["node"]["stargazers"].get("totalCount", 0)
     return total_stars
 
 
@@ -637,7 +664,7 @@ if __name__ == "__main__":
     follower_data, follower_time = perf_counter(follower_getter, USER_NAME)
 
     # several repositories that I've contributed to have since been deleted.
-    if OWNER_ID == {"id": "U_kgDOBkb8Cg"}:  # only calculate for user Andrew6rant
+    if OWNER_ID == {"id": "MDQ6VXNlcjU3MzMxMTM0"}:  # only calculate for user Andrew6rant
         archived_data = add_archive()
         for index in range(len(total_loc) - 1):
             total_loc[index] += archived_data[index]
